@@ -48,7 +48,7 @@ def merge_and_dispatch(args, global_model, global_optim, selected_ids, bsz_list,
         bsz_s += bsz_list[worker_idx]
         comm_cost += worker.config.grad_in.nelement() * 4
           
-    return loss, comm_cost
+    return loss.item(), comm_cost
 
 
 def control(args, active_num, worker_list):
@@ -61,6 +61,8 @@ def control(args, active_num, worker_list):
 
 
 def test(model_p, model_fe, data_loader, device=torch.device("cpu")):
+    model_p.to(device)
+    model_fe.to(device)
     model_p.eval()
     model_fe.eval()
     data_loader = data_loader.loader

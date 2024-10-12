@@ -47,6 +47,7 @@ class CommonConfig:
         self.data_path = None
         self.tag = None
         self.labels = None
+        self.local_epoch = None
         #这里用来存worker的
 
 
@@ -67,3 +68,4 @@ class ClientConfig:
         self.neighbor_paras=None
         self.neighbor_indices=None
         self.grad_in=None
+        self.local_epoch = None

@@ -134,7 +134,7 @@ def create_dataloaders(dataset, batch_size, selected_idxs=None, shuffle=True, pi
     
     return DataLoaderHelper(dataloader)
 
-def load_datasets(dataset_type, data_path="/data/schen/data"):
+def load_datasets(dataset_type, data_path="/data/zhongxiangwei/data/"):
     
     train_transform = load_default_transform(dataset_type, train=True)
     test_transform = load_default_transform(dataset_type, train=False)
