@@ -123,7 +123,7 @@ class LabelwisePartitioner(object):
         return len(self.data)
 
 
-def create_dataloaders(dataset, batch_size, selected_idxs=None, shuffle=True, pin_memory=True, num_workers=4, drop_last=False, collate_fn=None):
+def create_dataloaders(dataset, batch_size, selected_idxs=None, shuffle=True, pin_memory=True, num_workers=1, drop_last=False, collate_fn=None):
     if selected_idxs == None:
         dataloader = DataLoader(dataset, batch_size=batch_size,
                                     shuffle=shuffle, pin_memory=pin_memory, num_workers=num_workers, drop_last=drop_last, collate_fn=collate_fn)

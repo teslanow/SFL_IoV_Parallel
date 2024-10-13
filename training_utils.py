@@ -116,7 +116,7 @@ def control_seq(batch_size, active_num, worker_num):
     # bsz_list = np.random.randint(32, 64 + 1, len(worker_list))
     bsz_list = np.ones(worker_num, dtype=int) * batch_size
 
-    return selected_ids, bsz_list
+    return selected_ids.tolist(), bsz_list.tolist()
 
 
 def test2(model, data_loader, device):

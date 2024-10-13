@@ -1,0 +1,6 @@
+client_compute_density:
+  - 25600000000
+server_compute_density:
+  - 80000000000
+client_communicate_bandwidth:
+  - 2000000

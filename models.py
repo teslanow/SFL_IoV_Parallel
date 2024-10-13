@@ -54,6 +54,13 @@ class AlexNet(nn.Module):
         return F.log_softmax(x, dim=1)
 
 
+# 以下临时加的
+
+FP_density_AlexNet_DF1_CIFAR10 = 167400000
+BP_density_AlexNet_DF1_CIFAR10 = 167400000 * 2
+FP_density_AlexNet_DF2_CIFAR10 = 33610000
+BP_density_AlexNet_DF2_CIFAR10 = 33610000 *2
+
 class AlexNet_DF1(nn.Module):
     def __init__(self):
         super(AlexNet_DF1, self).__init__()

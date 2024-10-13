@@ -1,7 +1,13 @@
 import argparse
 import logging
 import os
+import random
+
+import numpy as np
+import torch
+import yaml
 from torch.utils.tensorboard import SummaryWriter
+from typing import List
 def prRed(skk): print("\033[91m {}\033[00m" .format(skk))
 def prGreen(skk): print("\033[92m {}\033[00m" .format(skk))
 
@@ -24,6 +30,10 @@ def parse_args():
     parser.add_argument('--expname', type=str, default='MergeSFL')
     parser.add_argument('--local_epoch', type=int, default=42)
     parser.add_argument('--active_num', type=int, default=1)
+    parser.add_argument('--sys_conf_path', type=str, default='ExpConfig/System_conf.yml')
+    # 指定一个同步轮训练中多少比例的clients能完成训练
+    parser.add_argument('--finish_ratio', type=float, default=1.0)
+    parser.add_argument('--device', type=str, default='cuda:0')
     return parser.parse_args()
 
 def set_comm_config(common_config, args):
@@ -101,4 +111,26 @@ class Statistics:
         self.comm_size_per_round_per_client[-1][client_id] = comm_size
 
 
+class Sys_conf:
+    def __init__(self):
+        self.client_compute_density : List[float]  = None
+        self.server_compute_density : List[float] = None
+        self.client_communicate_bandwidth : List[float] = None
 
+def load_system_config(path) -> Sys_conf:
+    with open(path, 'r') as f:
+        config = yaml.safe_load(f)
+    sys_conf = Sys_conf()
+    for k, v in config.items():
+        setattr(sys_conf, k, v)
+    return sys_conf
+
+
+def set_seed(self):
+    SEED = 1234
+    random.seed(SEED)
+    np.random.seed(SEED)
+    torch.manual_seed(SEED)
+    torch.cuda.manual_seed(SEED)
+    if torch.cuda.is_available():
+        torch.backends.cudnn.deterministic = True

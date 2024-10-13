@@ -4,7 +4,7 @@ import os
 python_path = "/root/anaconda3/envs/fedscale/bin/python"
 datatype = "CIFAR10"
 data_path = "/data/zhongxiangwei/data/CIFAR10"
-data_pattern = 0
+data_pattern = 8
 expname = "MergeSFL-Test"
 server_python_file = f"MergeSFL/server.py"
 client_python_file = f"MergeSFL/client.py"
