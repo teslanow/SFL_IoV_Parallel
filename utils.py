@@ -23,6 +23,7 @@ def parse_args():
     parser.add_argument('--use_cuda', action="store_false", default=True)
     parser.add_argument('--expname', type=str, default='MergeSFL')
     parser.add_argument('--local_epoch', type=int, default=42)
+    parser.add_argument('--active_num', type=int, default=1)
     return parser.parse_args()
 
 def set_comm_config(common_config, args):

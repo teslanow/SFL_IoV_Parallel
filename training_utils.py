@@ -60,11 +60,8 @@ def control(args, active_num, worker_list):
     return selected_ids, bsz_list
 
 
-def test(model_p, model_fe, data_loader, device=torch.device("cpu")):
-    model_p.to(device)
-    model_fe.to(device)
-    model_p.eval()
-    model_fe.eval()
+def test(model, data_loader, device):
+    model.to(device)
     data_loader = data_loader.loader
     test_loss = 0.0
     test_accuracy = 0.0
@@ -74,8 +71,7 @@ def test(model_p, model_fe, data_loader, device=torch.device("cpu")):
 
             data, target = data.to(device), target.to(device)
 
-            output1 = model_fe(data)
-            output = model_p(output1)
+            output = model(data)
 
             # sum up batch loss
             loss_func = nn.CrossEntropyLoss(reduction='sum') 

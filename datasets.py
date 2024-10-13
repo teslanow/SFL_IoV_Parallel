@@ -4,7 +4,7 @@ import torch
 import os
 from torch.utils.data import DataLoader, TensorDataset
 from torchvision import datasets, transforms
-from torchaudio.datasets import SPEECHCOMMANDS
+# from torchaudio.datasets import SPEECHCOMMANDS
 
 class Partition(object):
 
@@ -134,6 +134,21 @@ def create_dataloaders(dataset, batch_size, selected_idxs=None, shuffle=True, pi
     
     return DataLoaderHelper(dataloader)
 
+
+def create_dataloaders_without_helpler(dataset, batch_size, selected_idxs=None, shuffle=True, pin_memory=True, num_workers=4,
+                       drop_last=False, collate_fn=None):
+    if selected_idxs == None:
+        dataloader = DataLoader(dataset, batch_size=batch_size,
+                                shuffle=shuffle, pin_memory=pin_memory, num_workers=num_workers, drop_last=drop_last,
+                                collate_fn=collate_fn)
+    else:
+        partition = Partition(dataset, selected_idxs)
+        dataloader = DataLoader(partition, batch_size=batch_size,
+                                shuffle=shuffle, pin_memory=pin_memory, num_workers=num_workers, drop_last=drop_last,
+                                collate_fn=collate_fn)
+
+    return dataloader
+
 def load_datasets(dataset_type, data_path="/data/zhongxiangwei/data/"):
     
     train_transform = load_default_transform(dataset_type, train=True)
@@ -184,8 +199,9 @@ def load_datasets(dataset_type, data_path="/data/zhongxiangwei/data/"):
         test_dataset = datasets.ImageFolder('/data/zpsun/data/IMAGE100/test', transform = train_transform)
     
     elif dataset_type == 'SPEECH':
-        train_dataset = SubsetSC("training")
-        test_dataset = SubsetSC("testing")
+        pass
+        # train_dataset = SubsetSC("training")
+        # test_dataset = SubsetSC("testing")
 
     elif dataset_type == 'UCIHAR':
         INPUT_SIGNAL_TYPES = ["body_acc_x_","body_acc_y_","body_acc_z_",
@@ -343,28 +359,28 @@ def load_customized_transform(dataset_type):
     return dataset_transform
 
 
-class SubsetSC(SPEECHCOMMANDS):
-    def __init__(self, subset=None, partition=None):
-        super().__init__("/data/ymliao/data/speech/", download=True)
-
-        def load_list(filename):
-            filepath = os.path.join(self._path, filename)
-            with open(filepath) as fileobj:
-                return [os.path.normpath(os.path.join(self._path, line.strip())) for line in fileobj]
-
-        if subset == "validation":
-            self._walker = load_list("validation_list.txt")
-        elif subset == "testing":
-            self._walker = load_list("testing_list.txt")
-        elif subset == "training":
-            excludes = load_list("validation_list.txt") + load_list("testing_list.txt")
-            excludes = set(excludes)
-            if partition is not None:
-                tmp_walker = [w for w in self._walker if w not in excludes]
-                self._walker = [w for idx, w in enumerate(tmp_walker) if idx in partition]
-            else:
-                self._walker = [w for w in self._walker if w not in excludes]
-
+# class SubsetSC(SPEECHCOMMANDS):
+#     def __init__(self, subset=None, partition=None):
+#         super().__init__("/data/ymliao/data/speech/", download=True)
+#
+#         def load_list(filename):
+#             filepath = os.path.join(self._path, filename)
+#             with open(filepath) as fileobj:
+#                 return [os.path.normpath(os.path.join(self._path, line.strip())) for line in fileobj]
+#
+#         if subset == "validation":
+#             self._walker = load_list("validation_list.txt")
+#         elif subset == "testing":
+#             self._walker = load_list("testing_list.txt")
+#         elif subset == "training":
+#             excludes = load_list("validation_list.txt") + load_list("testing_list.txt")
+#             excludes = set(excludes)
+#             if partition is not None:
+#                 tmp_walker = [w for w in self._walker if w not in excludes]
+#                 self._walker = [w for idx, w in enumerate(tmp_walker) if idx in partition]
+#             else:
+#                 self._walker = [w for w in self._walker if w not in excludes]
+#
 
 def collate_fn(batch, labels):
 

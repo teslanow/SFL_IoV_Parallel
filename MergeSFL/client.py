@@ -22,6 +22,7 @@ csize = comm.Get_size()
 
 device = torch.device("cuda:%d" % (rank % 7 + 1) if args.use_cuda and torch.cuda.is_available() else "cpu")
 
+
 logger = get_client_logger(args, rank)
 # end logger
 
