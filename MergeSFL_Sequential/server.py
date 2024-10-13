@@ -5,7 +5,7 @@ import datasets, models
 import torch.optim as optim
 from training_utils import *
 from utils import *
-from .cient import *
+from cient import *
 
 args = parse_args()
 os.environ['CUDA_LAUNCH_BLOCKING'] = '0'
@@ -36,7 +36,6 @@ def main():
     result_out.write("epoch_idx, total_time, total_bandwith, total_resource, acc, test_loss")
     result_out.write('\n')
 
-    # global_model = models.create_model_instance(common_config.dataset_type, common_config.model_type)
     global_client_model, global_model = models.create_model_instance_SL(args.dataset_type, args.model_type)
 
     active_client_models = []
@@ -45,7 +44,7 @@ def main():
 
     active_clients = []
     for i in range(active_num):
-        active_clients.append(MS_Client())
+        active_clients.append(MS_Client(common_config))
 
     client_init_para = torch.nn.utils.parameters_to_vector(global_client_model.parameters())
     client_model_size = client_init_para.nelement() * 4 / 1024 / 1024
@@ -55,26 +54,21 @@ def main():
     global_init_para = torch.nn.utils.parameters_to_vector(global_model.parameters())
     global_model_size = global_init_para.nelement() * 4 / 1024 / 1024
     logger.info("para num: {}".format(global_init_para.nelement()))
-    logger.info("Global Model Size: {} MB".format(global_model_size))
+    logger.info("Global Server Model Size: {} MB".format(global_model_size))
 
     # Create model instance
     train_dataset, test_dataset, train_data_partition, labels = partition_data(args.dataset_type,
                                                                    args.data_pattern, args.data_path,
                                                                    worker_num)
-
     if labels:
         test_loader = datasets.create_dataloaders(test_dataset, batch_size=128, shuffle=False,
                                                   collate_fn=lambda x: datasets.collate_fn(x, labels))
     else:
         test_loader = datasets.create_dataloaders(test_dataset, batch_size=128, shuffle=False)
 
-    total_time = 0
-    total_comm_cost = 0
-    statistics = Statistics()
     epoch_lr = args.lr
 
     for epoch_idx in range(1, 1 + args.epoch):
-        start_time = time.time()
         # learning rate
         if epoch_idx > 1:
             epoch_lr = max((args.decay_rate * epoch_lr, args.min_lr))
@@ -88,22 +82,24 @@ def main():
         # selection strategy and batch size configuration for all virtual workers
         selected_ids, bsz_list = control_seq(args.batch_size, active_num, worker_num)
 
+        # 更新状态
+        for i in range(active_num):
+            cur_client_id = selected_ids[i]
+            cur_bs = bsz_list[cur_client_id]
+            train_data_idxes = train_data_partition.use(cur_client_id)
+            active_clients[i].initial_before_training(train_dataset, labels, cur_client_id, cur_bs, train_data_idxes,
+                                                      active_client_models[i], epoch_idx)
+
+        prRed(selected_ids)
+
         local_steps = 42
-
-        statistics.init_round(worker_num)
-
         for iter_idx in range(local_steps):
-            # 更新状态
-            current_server_bs = 0
-            for i in range(active_num):
-                cur_client_id = selected_ids[i]
-                cur_bs = bsz_list[cur_client_id]
-                train_data_idxes = train_data_partition.use(cur_client_id)
-                active_clients[i].initial_before_training(train_dataset, labels, cur_client_id, cur_bs, train_data_idxes, active_client_models[i], iter_idx)
 
             all_smashed_data = []
             all_targets = []
             all_detach_smashed_data = []
+
+            # 所有clients的正向过程
             for i in range(active_num):
                 client = active_clients[i]
                 send_smash, smashed_data, targets = local_FP_training(active_client_models[i], device, client.train_loader)
@@ -111,119 +107,39 @@ def main():
                 all_smashed_data.append(smashed_data)
                 all_targets.append(targets)
 
-            loss, all_grad_ins = merge_and_dispatch_seq()
-
-            # 训练local client 模型
-
-
             # split training
-            train_loss, comm_cost = merge_and_dispatch_seq(None, global_model, global_optim, selected_ids,
-                                                       bsz_list, worker_list, device)
+            train_loss, all_grads_in = merge_and_dispatch_seq(all_detach_smashed_data, all_targets, global_model, global_optim, selected_ids, bsz_list, device)
 
-            # dispatch grad
-            communication_parallel(worker_list, epoch_idx, comm, action="send_grad", selected_ids=selected_ids)
-
-            total_comm_cost += comm_cost / 1024 / 1024
-
-            for client_id in selected_ids:
-                statistics.update_client_comm_size(client_id, comm_cost)
-            statistics.update_server_sample(current_server_bs)
+            # 所有clients的反向过程
+            for i in range(active_num):
+                client = active_clients[i]
+                local_BP_training(all_grads_in[i], client.optimizer, all_smashed_data[i], device)
 
             print("\rstep: {} ".format(iter_idx + 1), end='', flush=True)
-        print('')
-        # get worker-side model
-        communication_parallel(worker_list, epoch_idx, comm, action="get_para", selected_ids=selected_ids)
+        print('\n')
+        # 聚合
+        result_para_state_dict = aggregate_model_dict(active_client_models, device)
+        global_client_model.load_state_dict(result_para_state_dict)
+        # evaluation
+        test_loss, acc = test(global_model, global_client_model, test_loader, device)
 
-        # aggregate worker-side model
-        # global_para = aggregate_model_para(client_model, selected_ids, worker_list, device)
-        global_para = aggregate_model_dict(client_model, selected_ids, worker_list, device)
-        end_time = time.time()
-
-        test_loss, acc = test(global_model, client_model, test_loader, device)
-        logger.info("Epoch: {}, accuracy: {}, test_loss: {}\n".format(epoch_idx, acc, test_loss))
         print("Epoch: {}, accuracy: {}, test_loss: {}".format(epoch_idx, acc, test_loss))
-
-        total_time += end_time - start_time
-
-        total_comm_cost += active_num * client_model_size * 2
-        total_bandwith, total_resource = 0, 0
-
-        recorder.add_scalar('Train/time', total_time, epoch_idx)
-        recorder.add_scalar('Test/acc', acc, epoch_idx)
-        recorder.add_scalar('Test/loss', test_loss, epoch_idx)
-        recorder.add_scalar('Test/acc-time', acc, total_time)
-        recorder.add_scalar('Train/comm_cost', total_comm_cost, epoch_idx)
-
         result_out.write(
-            '{} {:.2f} {:.2f} {:.2f} {:.4f} {:.4f}'.format(epoch_idx, total_time, total_bandwith, total_resource, acc,
+            '{} {:.2f} {:.2f} {:.2f} {:.4f} {:.4f}'.format(epoch_idx, 0, 0, 0, acc,
                                                            test_loss))
         result_out.write('\n')
 
-    result_out.close()
-    # close socket
 
-
-def aggregate_model_para(client_model, selected_ids, worker_list, device):
-    global_para = torch.nn.utils.parameters_to_vector(client_model.parameters()).detach()
-    # weight = 1.0 / len(selected_idxs)
+def aggregate_model_dict(active_models:List[torch.nn.Module], device):
+    # return state_dict
     with torch.no_grad():
-        para_delta = torch.zeros_like(global_para).to(device)
-        for worker_idx, worker in zip(selected_ids, worker_list):
-            para_delta += worker.config.neighbor_paras.to(device)
-        para_delta /= len(selected_ids)
-    torch.nn.utils.vector_to_parameters(para_delta, client_model.parameters())
-    return para_delta
-
-
-def aggregate_model_dict(client_model, selected_ids, worker_list, device):
-    with torch.no_grad():
-        local_model_para = []
-        for worker_idx, worker in zip(selected_ids, worker_list):
-            local_model_para.append(worker.config.neighbor_paras)
-        para_delta = copy.deepcopy(local_model_para[0])
+        para_delta = copy.deepcopy(active_models[0].state_dict())
         for para in para_delta.keys():
             para_delta[para] = para_delta[para].to(device)
-            for i in range(1, len(local_model_para)):
-                para_delta[para] += local_model_para[i][para].to(device)
-            para_delta[para] = torch.div(para_delta[para], len(local_model_para))
-    client_model.load_state_dict(copy.deepcopy(para_delta))
+            for i in range(1, len(active_models)):
+                para_delta[para] += active_models[i].state_dict()[para].to(device)
+            para_delta[para] = torch.div(para_delta[para], len(active_models))
     return para_delta
-
-
-def communication_parallel(worker_list, epoch_idx, comm, action, selected_ids=[], data=None):
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    tasks = []
-    for i, worker in enumerate(worker_list):
-        if action == "init":
-            task = asyncio.ensure_future(worker.send_init_config(comm, epoch_idx))
-
-        elif i < len(selected_ids):
-            worker_idx = selected_ids[i]
-            if action == "send_conf":
-                task = asyncio.ensure_future(worker.send_data((worker_idx, data[worker_idx]), comm, epoch_idx))
-
-            elif action == "assign_data":
-                task = asyncio.ensure_future(
-                    worker.send_data(data[worker_idx].config.train_data_idxes, comm, epoch_idx))
-
-            elif action == "send_model":
-                task = asyncio.ensure_future(worker.send_data(data, comm, epoch_idx))
-            elif action == "send_grad":
-                task = asyncio.ensure_future(worker.send_data(worker.config.grad_in, comm, epoch_idx))
-            elif action == "get_para":
-                task = asyncio.ensure_future(worker.get_model(comm, epoch_idx))
-
-            elif action == "get_status":
-                task = asyncio.ensure_future(worker.get_status(comm, epoch_idx))
-        else:
-            if action == "send_conf":
-                task = asyncio.ensure_future(worker.send_data((-1, -1), comm, epoch_idx))
-
-        tasks.append(task)
-    loop.run_until_complete(asyncio.wait(tasks))
-    loop.close()
-
 
 def non_iid_partition(ratio, train_class_num, worker_num):
     partition_sizes = np.ones((train_class_num, worker_num)) * ((1 - ratio) / (worker_num - 1))

@@ -25,7 +25,7 @@ class MS_Client:
                                                        selected_idxs=train_data_idxes,
                                                        pin_memory=False, drop_last=True)
 
-        print("vid({}) epoch-{} lr: {} bsz: {} ".format(client_id, local_epoch, self.epoch_lr, bsz))
+        # print("vid({}) epoch-{} lr: {} bsz: {} ".format(client_id, local_epoch, self.epoch_lr, bsz))
 
 
         if self.common_config.momentum < 0:
@@ -37,15 +37,19 @@ class MS_Client:
 
 
 def local_FP_training(local_model, device, train_loader):
+    local_model.train()
+    local_model.to(device)
     inputs, targets = next(train_loader)
     inputs = inputs.to(device)
     smashed_data = local_model(inputs)
-    send_smash = smashed_data.detach()
+    send_smash = smashed_data.clone().detach()
 
     return send_smash, smashed_data, targets
 
 
 def local_BP_training(grad_in, optimizer, smashed_data, device):
+    grad_in = grad_in.to(device)
+    smashed_data = smashed_data.to(device)
     optimizer.zero_grad()
     smashed_data.backward(grad_in.to(device))
     optimizer.step()

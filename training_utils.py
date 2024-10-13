@@ -24,14 +24,12 @@ def merge_and_dispatch_seq(all_detach_smashed_data, all_targets, global_model, g
     m_data = all_detach_smashed_data
     m_target = all_targets
 
-    for d in m_data:
-        d.to(device)
-    for t in m_target:
-        t.to(device)
-    global_model.to(device)
-
     m_data = torch.cat(m_data, dim=0)
     m_target = torch.cat(m_target, dim=0)
+
+    m_data = m_data.to(device)
+    m_target = m_target.to(device)
+    global_model = global_model.to(device)
 
     m_data.requires_grad_()
 
@@ -149,6 +147,10 @@ def test2(model, data_loader, device):
 
 
 def test(model_p, model_fe, data_loader, device=torch.device("cpu")):
+
+    model_fe.to(device)
+    model_p.to(device)
+
     model_p.eval()
     model_fe.eval()
     data_loader = data_loader.loader

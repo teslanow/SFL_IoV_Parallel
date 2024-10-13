@@ -143,6 +143,8 @@ def main():
                     statistics.update_client_sample(client_id, worker.config.exist_batch_size)
                     current_server_bs += worker.config.exist_batch_size
 
+            # prRed(f"当前有{len(selected_ids)}个clients")
+
             # collect data
             communication_parallel(worker_list, epoch_idx, comm, action="get_para", selected_ids=selected_ids)
 
