@@ -3,56 +3,53 @@ import copy
 from config import *
 import datasets, models
 import torch.optim as optim
-from mpi4py import MPI
 from training_utils import *
 from utils import *
+from .cient import *
 
 args = parse_args()
 os.environ['CUDA_LAUNCH_BLOCKING'] = '0'
 # os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 device = torch.device("cuda:7" if args.use_cuda and torch.cuda.is_available() else "cpu")
 
-comm = MPI.COMM_WORLD
-rank = comm.Get_rank()
-csize = comm.Get_size()
-
 recorder, logger = set_recorder_and_logger(args)
 
+
 def main():
-    logger.info("csize:{}".format(int(csize)))
-    logger.info("server start (rank):{}".format(int(rank)))
-    # init config
+    active_num = args.active_num
+    worker_num = args.worker_num
+
     common_config = CommonConfig()
     set_comm_config(common_config, args)
 
-    active_num = int(csize)-1
-    worker_num = args.worker_num
-
     path = os.getcwd()
-    print (path)
-    path = path+"//"+"result_recorder"
+    print(path)
+    path = path + "//" + "result_recorder"
     if not os.path.exists(path):
         os.makedirs(path)
 
-    now = time.strftime("%Y-%m-%d-%H_%M_%S",time.localtime(time.time()))
+    now = time.strftime("%Y-%m-%d-%H_%M_%S", time.localtime(time.time()))
     path = path + "//" + now + "_record.txt"
     result_out = open(path, 'w+')
-    print(args.__dict__,file=result_out)
+    print(args.__dict__, file=result_out)
     result_out.write('\n')
     result_out.write("epoch_idx, total_time, total_bandwith, total_resource, acc, test_loss")
     result_out.write('\n')
 
-
     # global_model = models.create_model_instance(common_config.dataset_type, common_config.model_type)
-    client_model, global_model = models.create_model_instance_SL(common_config.dataset_type, common_config.model_type)
-    client_init_para = torch.nn.utils.parameters_to_vector(client_model.parameters())
+    global_client_model, global_model = models.create_model_instance_SL(args.dataset_type, args.model_type)
 
-    global_model.to(device)
-    client_model.to(device)
+    active_client_models = []
+    for i in range(active_num):
+        active_client_models.append(copy.deepcopy(global_client_model))
 
-    common_config.para_nums = client_init_para.nelement()
+    active_clients = []
+    for i in range(active_num):
+        active_clients.append(MS_Client())
+
+    client_init_para = torch.nn.utils.parameters_to_vector(global_client_model.parameters())
     client_model_size = client_init_para.nelement() * 4 / 1024 / 1024
-    logger.info("para num: {}".format(common_config.para_nums))
+    logger.info("para num: {}".format(client_init_para.nelement()))
     logger.info("Client Model Size: {} MB".format(client_model_size))
 
     global_init_para = torch.nn.utils.parameters_to_vector(global_model.parameters())
@@ -60,94 +57,68 @@ def main():
     logger.info("para num: {}".format(global_init_para.nelement()))
     logger.info("Global Model Size: {} MB".format(global_model_size))
 
-     # Create model instance
-    _, test_dataset, train_data_partition, labels = partition_data(common_config.dataset_type, common_config.data_pattern,common_config.data_path, worker_num)
-    common_config.labels = labels
-
-    # create active workers
-    worker_list: List[Worker] = list()
-    for worker_idx in range(active_num):
-        worker_list.append(
-            Worker(config=ClientConfig(common_config=common_config), rank=worker_idx+1)
-        )
-
-    # set dynamic context for virtual workers
-    virtual_worker_list: List[Worker] = list()
-    for worker_idx in range(worker_num):
-        virtual_worker_list.append(
-            Worker(config=ClientConfig(common_config=common_config), rank=worker_idx+1)
-        )
-        train_data_idxes = train_data_partition.use(worker_idx)
-        virtual_worker_list[-1].config.train_data_idxes = train_data_idxes
-
-    # connect socket and send init config
-    communication_parallel(worker_list, 1, comm, action="init", selected_ids=np.arange(len(worker_list)))
-
-    # recorder: SummaryWriter = SummaryWriter()
-    global_model.to(device)
+    # Create model instance
+    train_dataset, test_dataset, train_data_partition, labels = partition_data(args.dataset_type,
+                                                                   args.data_pattern, args.data_path,
+                                                                   worker_num)
 
     if labels:
-        test_loader = datasets.create_dataloaders(test_dataset, batch_size=128, shuffle=False, collate_fn=lambda x: datasets.collate_fn(x, labels))
-
+        test_loader = datasets.create_dataloaders(test_dataset, batch_size=128, shuffle=False,
+                                                  collate_fn=lambda x: datasets.collate_fn(x, labels))
     else:
         test_loader = datasets.create_dataloaders(test_dataset, batch_size=128, shuffle=False)
-    
-    global_para = client_model.state_dict()
+
     total_time = 0
     total_comm_cost = 0
     statistics = Statistics()
     epoch_lr = args.lr
-    
-    the_number_selection_worker=list()
 
-    for epoch_idx in range(1, 1+common_config.epoch):
+    for epoch_idx in range(1, 1 + args.epoch):
         start_time = time.time()
         # learning rate
         if epoch_idx > 1:
             epoch_lr = max((args.decay_rate * epoch_lr, args.min_lr))
-        
-        if common_config.momentum < 0:
+
+        if args.momentum < 0:
             global_optim = optim.SGD(global_model.parameters(), lr=epoch_lr, weight_decay=args.weight_decay)
         else:
-            global_optim = optim.SGD(global_model.parameters(), lr=epoch_lr, momentum=common_config.momentum, nesterov=True, weight_decay=args.weight_decay)
+            global_optim = optim.SGD(global_model.parameters(), lr=epoch_lr, momentum=args.momentum,
+                                     nesterov=True, weight_decay=args.weight_decay)
 
         # selection strategy and batch size configuration for all virtual workers
-        selected_ids, bsz_list = control(common_config, active_num, virtual_worker_list)
+        selected_ids, bsz_list = control_seq(args.batch_size, active_num, worker_num)
 
-        # configuration
-        communication_parallel(worker_list, epoch_idx, comm, action="send_conf", selected_ids=selected_ids, data=bsz_list)
-
-        # assign data idxes
-        communication_parallel(worker_list, epoch_idx, comm, action="assign_data", selected_ids=selected_ids, data=virtual_worker_list)
-        
-        # broadcast worker-side model
-        communication_parallel(worker_list, epoch_idx, comm, action="send_model", selected_ids=selected_ids, data=global_para)
-
-        global_model.train()
         local_steps = 42
 
         statistics.init_round(worker_num)
 
         for iter_idx in range(local_steps):
             # 更新状态
-            communication_parallel(worker_list, epoch_idx, comm, action="get_status", selected_ids=selected_ids)
-
             current_server_bs = 0
-            for i, worker in enumerate(worker_list):
-                client_id = worker.config.exist_client_id
-                exist_status = worker.config.exist_status
-                if exist_status != 1:
-                    assert client_id in selected_ids
-                    selected_ids.remove(client_id)
-                else:
-                    statistics.update_client_sample(client_id, worker.config.exist_batch_size)
-                    current_server_bs += worker.config.exist_batch_size
+            for i in range(active_num):
+                cur_client_id = selected_ids[i]
+                cur_bs = bsz_list[cur_client_id]
+                train_data_idxes = train_data_partition.use(cur_client_id)
+                active_clients[i].initial_before_training(train_dataset, labels, cur_client_id, cur_bs, train_data_idxes, active_client_models[i], iter_idx)
 
-            # collect data
-            communication_parallel(worker_list, epoch_idx, comm, action="get_para", selected_ids=selected_ids)
+            all_smashed_data = []
+            all_targets = []
+            all_detach_smashed_data = []
+            for i in range(active_num):
+                client = active_clients[i]
+                send_smash, smashed_data, targets = local_FP_training(active_client_models[i], device, client.train_loader)
+                all_detach_smashed_data.append(send_smash)
+                all_smashed_data.append(smashed_data)
+                all_targets.append(targets)
+
+            loss, all_grad_ins = merge_and_dispatch_seq()
+
+            # 训练local client 模型
+
 
             # split training
-            train_loss, comm_cost = merge_and_dispatch(common_config, global_model, global_optim, selected_ids, bsz_list, worker_list, device)
+            train_loss, comm_cost = merge_and_dispatch_seq(None, global_model, global_optim, selected_ids,
+                                                       bsz_list, worker_list, device)
 
             # dispatch grad
             communication_parallel(worker_list, epoch_idx, comm, action="send_grad", selected_ids=selected_ids)
@@ -158,7 +129,6 @@ def main():
                 statistics.update_client_comm_size(client_id, comm_cost)
             statistics.update_server_sample(current_server_bs)
 
-
             print("\rstep: {} ".format(iter_idx + 1), end='', flush=True)
         print('')
         # get worker-side model
@@ -168,13 +138,13 @@ def main():
         # global_para = aggregate_model_para(client_model, selected_ids, worker_list, device)
         global_para = aggregate_model_dict(client_model, selected_ids, worker_list, device)
         end_time = time.time()
-       
+
         test_loss, acc = test(global_model, client_model, test_loader, device)
         logger.info("Epoch: {}, accuracy: {}, test_loss: {}\n".format(epoch_idx, acc, test_loss))
         print("Epoch: {}, accuracy: {}, test_loss: {}".format(epoch_idx, acc, test_loss))
 
         total_time += end_time - start_time
-        
+
         total_comm_cost += active_num * client_model_size * 2
         total_bandwith, total_resource = 0, 0
 
@@ -184,11 +154,14 @@ def main():
         recorder.add_scalar('Test/acc-time', acc, total_time)
         recorder.add_scalar('Train/comm_cost', total_comm_cost, epoch_idx)
 
-        result_out.write('{} {:.2f} {:.2f} {:.2f} {:.4f} {:.4f}'.format(epoch_idx, total_time, total_bandwith, total_resource, acc, test_loss))
+        result_out.write(
+            '{} {:.2f} {:.2f} {:.2f} {:.4f} {:.4f}'.format(epoch_idx, total_time, total_bandwith, total_resource, acc,
+                                                           test_loss))
         result_out.write('\n')
-    
+
     result_out.close()
     # close socket
+
 
 def aggregate_model_para(client_model, selected_ids, worker_list, device):
     global_para = torch.nn.utils.parameters_to_vector(client_model.parameters()).detach()
@@ -231,7 +204,8 @@ def communication_parallel(worker_list, epoch_idx, comm, action, selected_ids=[]
                 task = asyncio.ensure_future(worker.send_data((worker_idx, data[worker_idx]), comm, epoch_idx))
 
             elif action == "assign_data":
-                task = asyncio.ensure_future(worker.send_data(data[worker_idx].config.train_data_idxes, comm, epoch_idx))
+                task = asyncio.ensure_future(
+                    worker.send_data(data[worker_idx].config.train_data_idxes, comm, epoch_idx))
 
             elif action == "send_model":
                 task = asyncio.ensure_future(worker.send_data(data, comm, epoch_idx))
@@ -245,17 +219,17 @@ def communication_parallel(worker_list, epoch_idx, comm, action, selected_ids=[]
         else:
             if action == "send_conf":
                 task = asyncio.ensure_future(worker.send_data((-1, -1), comm, epoch_idx))
-          
+
         tasks.append(task)
     loop.run_until_complete(asyncio.wait(tasks))
     loop.close()
 
 
 def non_iid_partition(ratio, train_class_num, worker_num):
-    partition_sizes = np.ones((train_class_num, worker_num)) * ((1 - ratio) / (worker_num-1))
+    partition_sizes = np.ones((train_class_num, worker_num)) * ((1 - ratio) / (worker_num - 1))
 
     for i in range(train_class_num):
-        partition_sizes[i][i%worker_num]=ratio
+        partition_sizes[i][i % worker_num] = ratio
 
     return partition_sizes
 
@@ -324,8 +298,10 @@ def partition_data(dataset_type, data_pattern, data_path, worker_num=10):
         print('Dirichlet partition 0.05')
         partition_sizes = dirichlet_partition(dataset_type, 0.01, worker_num, train_class_num)
 
-    train_data_partition = datasets.LabelwisePartitioner(train_dataset, partition_sizes=partition_sizes, class_num=train_class_num, labels=labels)
+    train_data_partition = datasets.LabelwisePartitioner(train_dataset, partition_sizes=partition_sizes,
+                                                         class_num=train_class_num, labels=labels)
     return train_dataset, test_dataset, train_data_partition, labels
+
 
 if __name__ == "__main__":
     main()

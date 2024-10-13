@@ -59,6 +59,9 @@ def get_client_logger(args, rank):
 def set_recorder_and_logger(args):
     RESULT_PATH = os.getcwd() + '/server/'
 
+    if not os.path.exists(RESULT_PATH):
+        os.makedirs(RESULT_PATH, exist_ok=True)
+
     recorder: SummaryWriter = SummaryWriter(os.path.join('runs', args.expname))
 
     logger = logging.getLogger(os.path.basename(__file__).split('.')[0])
@@ -72,4 +75,30 @@ def set_recorder_and_logger(args):
     logger.addHandler(fileHandler)
 
     return recorder, logger
+
+
+class Statistics:
+    def __init__(self):
+        # 每个client在每一个同步round前的运行samples的数目
+        self.run_samples_per_round_per_client = []
+        # server在每一个同步round前的运行samples的数目
+        self.run_samples_per_round_server = []
+        # 每个client在每一个同步round前的通信的数据量
+        self.comm_size_per_round_per_client = []
+
+    def init_round(self, num_total_clients):
+        self.run_samples_per_round_per_client.append([0 for _ in range(num_total_clients)])
+        self.run_samples_per_round_server.append(0)
+        self.comm_size_per_round_per_client.append([0 for _ in range(num_total_clients)])
+
+    def update_client_sample(self, client_id, num_samples):
+        self.run_samples_per_round_per_client[-1][client_id] = num_samples
+
+    def update_server_sample(self, num_samples):
+        self.run_samples_per_round_server[-1] = num_samples
+
+    def update_client_comm_size(self, client_id, comm_size):
+        self.comm_size_per_round_per_client[-1][client_id] = comm_size
+
+
 

@@ -3,6 +3,59 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
+def merge_and_dispatch_seq(all_detach_smashed_data, all_targets, global_model, global_optim, selected_ids, bsz_list,
+                       device=torch.device('cpu')):
+    """
+    merge collected batches for server-side training
+
+    Parameters:
+        global_model: server-side model
+        global_optim: server-side optimizer
+        bsz_list: list of batchsizes for all workers
+
+    Return:
+        average training loss
+        comm cost
+    """
+
+    comm_cost = 0
+    # merge smashed data
+    m_data = all_detach_smashed_data
+    m_target = all_targets
+
+    for d in m_data:
+        d.to(device)
+    for t in m_target:
+        t.to(device)
+    global_model.to(device)
+
+    m_data = torch.cat(m_data, dim=0)
+    m_target = torch.cat(m_target, dim=0)
+
+    m_data.requires_grad_()
+
+    # server side fp
+    outputs = global_model(m_data)
+    loss = F.cross_entropy(outputs, m_target.long())
+
+    # server side bp
+    global_optim.zero_grad()
+    loss.backward()
+    global_optim.step()
+
+    # gradient dispatch
+    sum_bsz = sum([bsz_list[i] for i in selected_ids])
+    bsz_s = 0
+    all_grad_ins = []
+    for worker_idx in selected_ids:
+        grad_in = (m_data.grad[bsz_s: bsz_s + bsz_list[worker_idx]] * sum_bsz / bsz_list[worker_idx])
+        bsz_s += bsz_list[worker_idx]
+        all_grad_ins.append(grad_in.clone().detach())
+
+    return loss.item(), all_grad_ins
+
+
 def merge_and_dispatch(args, global_model, global_optim, selected_ids, bsz_list, worker_list, device=torch.device('cpu')):
     """
     merge collected batches for server-side training
@@ -60,7 +113,15 @@ def control(args, active_num, worker_list):
     return selected_ids, bsz_list
 
 
-def test(model, data_loader, device):
+def control_seq(batch_size, active_num, worker_num):
+    selected_ids = np.random.choice(range(worker_num), size=active_num, replace=False)
+    # bsz_list = np.random.randint(32, 64 + 1, len(worker_list))
+    bsz_list = np.ones(worker_num, dtype=int) * batch_size
+
+    return selected_ids, bsz_list
+
+
+def test2(model, data_loader, device):
     model.to(device)
     data_loader = data_loader.loader
     test_loss = 0.0
@@ -86,3 +147,30 @@ def test(model, data_loader, device):
     test_accuracy = np.float(1.0 * correct / len(data_loader.dataset))
     return test_loss, test_accuracy
 
+
+def test(model_p, model_fe, data_loader, device=torch.device("cpu")):
+    model_p.eval()
+    model_fe.eval()
+    data_loader = data_loader.loader
+    test_loss = 0.0
+    test_accuracy = 0.0
+    correct = 0
+    with torch.no_grad():
+        for data, target in data_loader:
+            data, target = data.to(device), target.to(device)
+
+            output1 = model_fe(data)
+            output = model_p(output1)
+
+            # sum up batch loss
+            loss_func = nn.CrossEntropyLoss(reduction='sum')
+            test_loss += loss_func(output, target.long()).item()
+
+            pred = output.argmax(1, keepdim=True)
+            batch_correct = pred.eq(target.view_as(pred)).sum().item()
+
+            correct += batch_correct
+
+    test_loss /= len(data_loader.dataset)
+    test_accuracy = np.float(1.0 * correct / len(data_loader.dataset))
+    return test_loss, test_accuracy

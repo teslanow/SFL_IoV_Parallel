@@ -97,7 +97,7 @@ async def local_training(comm, common_config, train_dataset, test_loader, labels
         epoch_lr = max((common_config.decay_rate * epoch_lr, common_config.min_lr))
         common_config.lr = epoch_lr
 
-    # get configuration
+    # get configuration, vid是这个进程当前赋予的client_id
     vid, bsz = await get_data(comm, MASTER_RANK, common_config.tag)
 
     if vid < 0:
@@ -132,6 +132,12 @@ async def local_training(comm, common_config, train_dataset, test_loader, labels
     local_steps = 42
     local_model.train()
     for iter_idx in range(local_steps):
+
+        data = (vid, 1, bsz)
+        # 发送当前状态
+        await send_data(comm, data, MASTER_RANK, common_config.tag)
+
+
         inputs, targets = next(train_loader)
 
         inputs = inputs.to(device)
