@@ -1,12 +1,13 @@
+import itertools
 import random
 import numpy as np
 import torch
 import os
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, Dataset
 from torchvision import datasets, transforms
 # from torchaudio.datasets import SPEECHCOMMANDS
 
-class Partition(object):
+class Partition(Dataset):
 
     def __init__(self, data, index):
         self.data = data
@@ -134,6 +135,17 @@ def create_dataloaders(dataset, batch_size, selected_idxs=None, shuffle=True, pi
     
     return DataLoaderHelper(dataloader)
 
+class InfiniteSampler(torch.utils.data.Sampler):
+    def __init__(self, data_source):
+        self.data_source = data_source
+
+    def __iter__(self):
+        while True:
+            # yield from itertools.cycle(range(len(self.data_source)))  # 随机打乱并无限循环
+            yield from torch.randperm(len(self.data_source))
+
+    def __len__(self):
+        return len(self.data_source)
 
 def create_dataloaders_without_helpler(dataset, batch_size, selected_idxs=None, shuffle=True, pin_memory=True, num_workers=4,
                        drop_last=False, collate_fn=None):
@@ -143,11 +155,11 @@ def create_dataloaders_without_helpler(dataset, batch_size, selected_idxs=None, 
                                 collate_fn=collate_fn)
     else:
         partition = Partition(dataset, selected_idxs)
-        dataloader = DataLoader(partition, batch_size=batch_size,
-                                shuffle=shuffle, pin_memory=pin_memory, num_workers=num_workers, drop_last=drop_last,
-                                collate_fn=collate_fn)
+        sampler = InfiniteSampler(partition)
+        dataloader = DataLoader(partition, batch_size=batch_size, sampler=sampler)
 
-    return dataloader
+    return iter(dataloader)
+
 
 def load_datasets(dataset_type, data_path="/data/zhongxiangwei/data/"):
     

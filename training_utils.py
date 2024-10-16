@@ -1,3 +1,5 @@
+import random
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -117,6 +119,13 @@ def control_seq(batch_size, active_num, worker_num):
     bsz_list = np.ones(worker_num, dtype=int) * batch_size
 
     return selected_ids.tolist(), bsz_list.tolist()
+
+def control_seq_2(batch_size, active_num, worker_list, worker_num):
+    selected_ids = random.sample(worker_list, min(len(worker_list), active_num))
+    # bsz_list = np.random.randint(32, 64 + 1, len(worker_list))
+    bsz_list = np.ones(worker_num, dtype=int) * batch_size
+
+    return selected_ids, bsz_list.tolist()
 
 
 def test2(model, data_loader, device):

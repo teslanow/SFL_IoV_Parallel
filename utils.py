@@ -1,4 +1,5 @@
 import argparse
+from datetime import datetime
 import logging
 import os
 import random
@@ -72,7 +73,8 @@ def set_recorder_and_logger(args):
     if not os.path.exists(RESULT_PATH):
         os.makedirs(RESULT_PATH, exist_ok=True)
 
-    recorder: SummaryWriter = SummaryWriter(os.path.join('runs', args.expname))
+    cur_time = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    recorder: SummaryWriter = SummaryWriter(os.path.join('runs', args.expname, f"{args.finish_ratio}_{args.data_pattern}_{cur_time}"))
 
     logger = logging.getLogger(os.path.basename(__file__).split('.')[0])
     logger.setLevel(logging.INFO)

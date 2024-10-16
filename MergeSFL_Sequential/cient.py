@@ -36,12 +36,12 @@ class MS_Client:
             self.common_config.lr = self.epoch_lr
         del self.train_loader
         if labels:
-            self.train_loader = datasets.create_dataloaders(train_dataset, batch_size=int(bsz),
+            self.train_loader = datasets.create_dataloaders_without_helpler(train_dataset, batch_size=int(bsz),
                                                        selected_idxs=train_data_idxes,
                                                        pin_memory=False, drop_last=True,
                                                        collate_fn=lambda x: datasets.collate_fn(x, labels))
         else:
-            self.train_loader = datasets.create_dataloaders(train_dataset, batch_size=int(bsz),
+            self.train_loader = datasets.create_dataloaders_without_helpler(train_dataset, batch_size=int(bsz),
                                                        selected_idxs=train_data_idxes,
                                                        pin_memory=False, drop_last=True)
 
@@ -73,6 +73,7 @@ def local_FP_training(local_model, device, train_loader):
     local_model.train()
     local_model.to(device)
     inputs, targets = next(train_loader)
+    # print(targets.shape)
     inputs = inputs.to(device)
     smashed_data = local_model(inputs)
     send_smash = smashed_data.clone().detach()

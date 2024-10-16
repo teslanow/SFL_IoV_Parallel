@@ -59,6 +59,8 @@ def main():
     train_dataset, test_dataset, train_data_partition, labels = partition_data(args.dataset_type,
                                                                    args.data_pattern, args.data_path,
                                                                    worker_num)
+    # 去除空的partition
+
     if labels:
         test_loader = datasets.create_dataloaders(test_dataset, batch_size=128, shuffle=False,
                                                   collate_fn=lambda x: datasets.collate_fn(x, labels))
@@ -68,6 +70,9 @@ def main():
     epoch_lr = args.lr
 
     cur_time = 0
+
+    # 异常检查，因为partition有可能为空
+    worker_list = [index for index in range(worker_num) if len(train_data_partition.use(index)) > 0]
 
     for epoch_idx in range(1, 1 + args.epoch):
         # learning rate
@@ -81,12 +86,12 @@ def main():
                                      nesterov=True, weight_decay=args.weight_decay)
 
         # selection strategy and batch size configuration for all virtual workers
-        selected_ids, bsz_list = control_seq(args.batch_size, active_num, worker_num)
+        selected_ids, bsz_list = control_seq_2(args.batch_size, active_num, worker_list, worker_num)
 
         id2client = dict()
 
         # 更新状态
-        for i in range(active_num):
+        for i in range(len(selected_ids)):
             cur_client_id = selected_ids[i]
             cur_bs = bsz_list[cur_client_id]
             train_data_idxes = train_data_partition.use(cur_client_id)
@@ -99,11 +104,13 @@ def main():
             client.update_communicate_bandwidth(random.choice(sys_conf.client_communicate_bandwidth))
             id2client[cur_client_id] = client
 
-
+        comm_time = 0
 
         # 计算模型下载时间
         parallel_param_comm = np.array([client_model_size for _ in range(len(active_clients))])
         cur_time += np.max(parallel_param_comm / np.array(
+            [active_clients[i].communicate_bandwidth for i in range(len(active_clients))]))
+        comm_time += np.max(parallel_param_comm / np.array(
             [active_clients[i].communicate_bandwidth for i in range(len(active_clients))]))
         prRed(selected_ids)
         local_steps = 42
@@ -118,6 +125,8 @@ def main():
             id2client[t].local_steps = steps_of_failed_ids[i]
 
         t_active_clients = active_clients
+
+
 
         for iter_idx in range(local_steps):
 
@@ -160,6 +169,8 @@ def main():
             forward_time = np.max(parallel_FP_compute_times + parallel_comm_client2server) + simulate_server_FP_compute(t_active_clients)
             backward_time = simulate_server_BP_compute(t_active_clients) + np.max(parallel_comm_server2client + parallel_BP_compute_times)
 
+            comm_time += ((np.average(parallel_comm_client2server)) + (np.average(parallel_comm_server2client)))
+
             cur_time += (forward_time + backward_time)
 
             print("\rstep: {} ".format(iter_idx + 1), end='', flush=True)
@@ -170,8 +181,12 @@ def main():
 
         # 统计参数上传时间
         parallel_param_comm = np.array([client_model_size for _ in range(len(t_active_clients))])
+
+        comm_time += np.max(parallel_param_comm / np.array([t_active_clients[i].communicate_bandwidth for i in range(len(t_active_clients))]))
         cur_time += np.max(parallel_param_comm / np.array([t_active_clients[i].communicate_bandwidth for i in range(len(t_active_clients))]))
 
+        print(comm_time)
+        print(cur_time)
         # evaluation
         test_loss, acc = test(global_model, global_client_model, test_loader, device)
 
@@ -288,7 +303,6 @@ def partition_data(dataset_type, data_pattern, data_path, worker_num=10):
     elif data_pattern == 8:  # dir-0.1
         print('Dirichlet partition 0.05')
         partition_sizes = dirichlet_partition(dataset_type, 0.01, worker_num, train_class_num)
-
     train_data_partition = datasets.LabelwisePartitioner(train_dataset, partition_sizes=partition_sizes,
                                                          class_num=train_class_num, labels=labels)
     return train_dataset, test_dataset, train_data_partition, labels
