@@ -2,7 +2,7 @@ import copy
 from models import *
 from config import *
 from training_utils import *
-from utils import *
+from Common.utils import *
 from .cient import *
 set_seed(1234)
 args = parse_args()
@@ -61,11 +61,7 @@ def main():
                                                                    worker_num)
     # 去除空的partition
 
-    if labels:
-        test_loader = datasets.create_dataloaders(test_dataset, batch_size=128, shuffle=False,
-                                                  collate_fn=lambda x: datasets.collate_fn(x, labels))
-    else:
-        test_loader = datasets.create_dataloaders(test_dataset, batch_size=128, shuffle=False)
+    test_loader = datasets.cre(test_dataset, batch_size=128, shuffle=False)
 
     epoch_lr = args.lr
 
@@ -231,81 +227,6 @@ def aggregate_model_dict(active_models:List[torch.nn.Module], device):
             para_delta[para] = torch.div(para_delta[para], len(active_models))
     return para_delta
 
-def non_iid_partition(ratio, train_class_num, worker_num):
-    partition_sizes = np.ones((train_class_num, worker_num)) * ((1 - ratio) / (worker_num - 1))
-
-    for i in range(train_class_num):
-        partition_sizes[i][i % worker_num] = ratio
-
-    return partition_sizes
-
-
-def dirichlet_partition(dataset_type: str, alpha: float, worker_num: int, nclasses: int):
-    partition_sizes = []
-    filepath = './data_partition/%s-part_dir%.1f.npy' % (dataset_type, alpha)
-    if os.path.exists(filepath):
-        partition_sizes = np.load(filepath)
-    else:
-        for _ in range(nclasses):
-            partition_sizes.append(np.random.dirichlet([alpha] * worker_num))
-        partition_sizes = np.array(partition_sizes)
-        # np.save(filepath, partition_sizes)
-
-    return partition_sizes
-
-
-def partition_data(dataset_type, data_pattern, data_path, worker_num=10):
-    train_dataset, test_dataset = datasets.load_datasets(dataset_type, data_path)
-    labels = None
-    if dataset_type == "CIFAR10" or dataset_type == "FashionMNIST":
-        train_class_num = 10
-
-    elif dataset_type == "EMNIST":
-        train_class_num = 62
-
-    elif dataset_type == "CIFAR100" or dataset_type == "image100":
-        train_class_num = 100
-
-    elif dataset_type == "UCIHAR":
-        train_class_num = 6
-
-    elif dataset_type == "SPEECH":
-        train_class_num = 35
-        labels = sorted(list(set(datapoint[2] for datapoint in train_dataset)))
-
-    if data_pattern == 0:
-        partition_sizes = np.ones((train_class_num, worker_num)) * (1.0 / worker_num)
-    elif data_pattern == 1:
-        non_iid_ratio = 0.2
-        partition_sizes = non_iid_partition(non_iid_ratio, train_class_num, worker_num)
-    elif data_pattern == 2:
-        non_iid_ratio = 0.4
-        partition_sizes = non_iid_partition(non_iid_ratio, train_class_num, worker_num)
-    elif data_pattern == 3:
-        non_iid_ratio = 0.6
-        partition_sizes = non_iid_partition(non_iid_ratio, train_class_num, worker_num)
-    elif data_pattern == 4:
-        non_iid_ratio = 0.8
-        partition_sizes = non_iid_partition(non_iid_ratio, train_class_num, worker_num)
-
-    elif data_pattern == 5:  # dir-1.0
-        print('Dirichlet partition 1.0')
-        partition_sizes = dirichlet_partition(dataset_type, 1.0, worker_num, train_class_num)
-
-    elif data_pattern == 6:  # dir-0.5
-        print('Dirichlet partition 0.5')
-        partition_sizes = dirichlet_partition(dataset_type, 0.5, worker_num, train_class_num)
-
-    elif data_pattern == 7:  # dir-0.1
-        print('Dirichlet partition 0.1')
-        partition_sizes = dirichlet_partition(dataset_type, 0.1, worker_num, train_class_num)
-
-    elif data_pattern == 8:  # dir-0.1
-        print('Dirichlet partition 0.05')
-        partition_sizes = dirichlet_partition(dataset_type, 0.01, worker_num, train_class_num)
-    train_data_partition = datasets.LabelwisePartitioner(train_dataset, partition_sizes=partition_sizes,
-                                                         class_num=train_class_num, labels=labels)
-    return train_dataset, test_dataset, train_data_partition, labels
 
 
 if __name__ == "__main__":

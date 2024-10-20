@@ -5,7 +5,6 @@ import torch
 import os
 from torch.utils.data import DataLoader, TensorDataset, Dataset
 from torchvision import datasets, transforms
-# from torchaudio.datasets import SPEECHCOMMANDS
 
 class Partition(Dataset):
 
@@ -160,6 +159,19 @@ def create_dataloaders_without_helpler(dataset, batch_size, selected_idxs=None, 
 
     return iter(dataloader)
 
+def create_dataloaders_fedavg(dataset, batch_size, selected_idxs=None, shuffle=True, pin_memory=True, num_workers=4,
+                       drop_last=False, collate_fn=None):
+    if selected_idxs is None:
+        dataloader = DataLoader(dataset, batch_size=batch_size,
+                                shuffle=shuffle, pin_memory=pin_memory, num_workers=num_workers, drop_last=drop_last,
+                                collate_fn=collate_fn)
+    else:
+        partition = Partition(dataset, selected_idxs)
+        dataloader = DataLoader(partition, batch_size=batch_size,
+                                shuffle=shuffle, pin_memory=pin_memory, num_workers=num_workers, drop_last=drop_last,
+                                collate_fn=collate_fn)
+
+    return dataloader
 
 def load_datasets(dataset_type, data_path="/data/zhongxiangwei/data/"):
     

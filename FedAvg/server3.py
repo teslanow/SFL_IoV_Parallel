@@ -1,22 +1,53 @@
-import numpy as np
 import torch.nn
-from torch.utils.data import DataLoader
 from torchvision import models, datasets
-import datasets, models
-from FedAvgUtil import prepare_running
+import copy
+from config import *
+import models
+from Common.utils import *
 import torch.optim as optim
-from Common.CommDatasets import load_datasets, partition_data
+
+
+def aggregate_model_dict(active_models:List[torch.nn.Module], device, run_samples: List[int]):
+    # return state_dict
+    with torch.no_grad():
+        para_delta = copy.deepcopy(active_models[0].state_dict())
+        keys = para_delta.keys()
+        for para in keys:
+            para_delta[para].zero_()
+            para_delta[para].to(device)
+        total_samples = sum(run_samples)
+        ratios = (np.array(run_samples) / total_samples).tolist()
+        for para in keys:
+            for i in range(0, len(active_models)):
+                para_delta[para] += (ratios[i] * active_models[i].state_dict()[para].to(device))
+    return para_delta
+
 def main():
-    args, recorder, logger = prepare_running()
+    args = parse_args()
+    server_device = args.device
+    # os.environ['CUDA_LAUNCH_BLOCKING'] = '0'
+    recorder, logger = set_recorder_and_logger(args)
+    # init config
+
     active_num = args.active_num
     worker_num = args.worker_num
-    server_device = args.device
 
-    train_dataset, test_dataset = load_datasets(args.dataset, args.data_path)
-    client_datasets = partition_data(train_dataset, worker_num, args.data_pattern)
-    test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False)
+    path = os.getcwd()
+    print(path)
+    path = path + "//" + "result_recorder"
+    if not os.path.exists(path):
+        os.makedirs(path)
 
-    
+    now = time.strftime("%Y-%m-%d-%H_%M_%S", time.localtime(time.time()))
+    path = path + "//" + now + "_record.txt"
+    result_out = open(path, 'w+')
+    print(args.__dict__, file=result_out)
+    result_out.write('\n')
+    result_out.write("epoch_idx, total_time, total_bandwith, total_resource, acc, test_loss")
+    result_out.write('\n')
+
+    train_dataset, test_dataset, train_data_partition, labels = partition_data(args.dataset_type, args.data_pattern, args.data_path, worker_num)
+    test_loader = datasets.create_dataloaders_fedavg(test_dataset, batch_size=256, shuffle=False)
 
     # 创建模型
     active_models = []

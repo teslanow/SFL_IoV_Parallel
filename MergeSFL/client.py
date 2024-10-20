@@ -1,13 +1,10 @@
-import argparse
 import asyncio
-import torch
 import torch.optim as optim
 from config import ClientConfig, CommonConfig
 from comm_utils import *
-import datasets, models
+import models
 from mpi4py import MPI
-import logging
-from utils import *
+from Common.utils import *
 
 parser = argparse.ArgumentParser(description='Distributed Client')
 parser.add_argument('--visible_cuda', type=str, default='-1')

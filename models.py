@@ -1,8 +1,8 @@
-import math
+from typing import Tuple
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
-
+from ptflops import get_model_complexity_info
 def create_model_instance_SL(dataset_type, model_type, class_num=10):
     # return VGG9()
     # return EMNIST_CNN1(),EMNIST_CNN2()
@@ -17,7 +17,11 @@ def create_model_instance_SL(dataset_type, model_type, class_num=10):
 
 def create_model_full(dataset_type, model_type, class_num=10):
     if dataset_type == 'CIFAR10':
-        return AlexNet()
+        return AlexNet(class_num=class_num)
+    elif dataset_type == 'CIFAR100':
+        return AlexNet(class_num=class_num)
+    else:
+        raise NotImplementedError
 
 class AlexNet(nn.Module):
     def __init__(self, class_num=10):
@@ -440,3 +444,18 @@ class M5_2(nn.Module):
         x = x.permute(0, 2, 1)
         x = self.fc_layer(x)
         return F.log_softmax(x, dim=2).squeeze()
+
+def model_density_per_layer(model: torch.nn.Module, input_res: Tuple[int, int, int]):
+    """
+    返回model前向需要的mac数，unit in multiply-add-num
+    返回参数数量， unit in 个
+    Args:
+        model:
+        input_res: 每个batch的输入resolution，例如(3, 32, 32)
+
+    Returns:
+
+    """
+    macs, params = get_model_complexity_info(model, input_res, as_strings=False, backend='pytorch',
+                                           print_per_layer_stat=False, verbose=False)
+    return macs, params
