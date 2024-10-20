@@ -173,3 +173,19 @@ def partition_data(train_dataset:datasets, worker_num:int, data_pattern:int):
         split_size[-1] += left_size
     client_datasets = random_split(train_dataset, split_size)
     return client_datasets
+
+
+class InfiniteSampler(torch.utils.data.Sampler):
+    """
+    专门用于mergesfl
+    """
+    def __init__(self, data_source):
+        self.data_source = data_source
+
+    def __iter__(self):
+        while True:
+            # yield from itertools.cycle(range(len(self.data_source)))  # 随机打乱并无限循环
+            yield from torch.randperm(len(self.data_source))
+
+    def __len__(self):
+        return len(self.data_source)

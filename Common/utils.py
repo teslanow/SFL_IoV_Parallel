@@ -1,5 +1,6 @@
 import argparse
 import json
+import signal
 from datetime import datetime
 import logging
 import os
@@ -7,12 +8,13 @@ import random
 
 import numpy as np
 import torch
+import wandb
 import yaml
 from torch.utils.tensorboard import SummaryWriter
 from typing import List
 from Common.ClientProperties import ClientPropertyManager
 import datasets
-import time
+from Common.WandbWrapper import wandbInit, wandbFinishWrap
 
 def prRed(skk): print("\033[91m {}\033[00m" .format(skk))
 def prGreen(skk): print("\033[92m {}\033[00m" .format(skk))
@@ -247,21 +249,33 @@ def evaluate(model, test_loader, criterion, device):
 
 def prepare_running():
     args = parse_args()
-    recorder, logger = set_recorder_and_logger(args)
-    path = os.getcwd()
-    print(path)
-    path = path + "//" + "result_recorder"
-    if not os.path.exists(path):
-        os.makedirs(path)
-    now = time.strftime("%Y-%m-%d-%H_%M_%S", time.localtime(time.time()))
-    path = path + "//" + now + "_record.txt"
-    result_out = open(path, 'w+')
-    result_out.write(f"\ncorresponding dir : {recorder.get_logdir()}\n")
-    json.dump(args.__dict__, result_out, indent=4)
+    # recorder, logger = set_recorder_and_logger(args)
+    # path = os.getcwd()
+    # print(path)
+    # path = path + "//" + "result_recorder"
+    # if not os.path.exists(path):
+    #     os.makedirs(path)
+    # now = time.strftime("%Y-%m-%d-%H_%M_%S", time.localtime(time.time()))
+    # path = path + "//" + now + "_record.txt"
+    # result_out = open(path, 'w+')
+    # result_out.write(f"\ncorresponding dir : {recorder.get_logdir()}\n")
+    # json.dump(args.__dict__, result_out, indent=4)
     # print(args.__dict__, file=result_out)
-    result_out.write('\n')
-    result_out.write("epoch_idx, total_time, total_bandwith, total_resource, acc, test_loss")
-    result_out.write('\n')
+    # result_out.write('\n')
+    # result_out.write("epoch_idx, total_time, total_bandwith, total_resource, acc, test_loss")
+    # result_out.write('\n')
 
+    recorder, logger, result_out = None, None, None
     client_manager = ClientPropertyManager('ExpConfig/vehicle_device_capacity')
+    # 设置signal handler
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    # signal.signal(signal.SIGKILL, signal_handler)
+    signal.signal(signal.SIGHUP, signal_handler)
     return args, recorder, logger, client_manager, result_out
+
+def signal_handler(sig, frame):
+    print(f'You pressed {sig}!')
+    # 在这里执行清理操作
+    wandbFinishWrap()
+    exit()

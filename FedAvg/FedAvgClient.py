@@ -10,18 +10,19 @@ class FedAvgClient(ClientBase):
         self.model.to(device)
         self.model.train()
         run_samples = 0
-        for inputs, labels in self.train_dataloader:
-            # batch normalization的bug
-            if inputs.size(0) <= 1:
-                continue
-            inputs, labels = inputs.to(device), labels.to(device)
-            self.optimizer.zero_grad()
-            outputs = self.model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            self.optimizer.step()
-            # 统计数据
-            run_samples += inputs.size(0)
+        if self.train_dataloader is not None:
+            for inputs, labels in self.train_dataloader:
+                # batch normalization的bug
+                if inputs.size(0) <= 1:
+                    continue
+                inputs, labels = inputs.to(device), labels.to(device)
+                self.optimizer.zero_grad()
+                outputs = self.model(inputs)
+                loss = criterion(outputs, labels)
+                loss.backward()
+                self.optimizer.step()
+                # 统计数据
+                run_samples += inputs.size(0)
         return run_samples
 
     def set_optimizer(self, lr, momentum, weight_decay):

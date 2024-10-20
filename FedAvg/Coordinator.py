@@ -7,16 +7,19 @@ from BaseFunc.Selector import uniform_select
 from FedAvg.Aggregation import aggregate_model_dict
 import torch
 from Common.utils import evaluate, prRed, prepare_running
+from Common.WandbWrapper import wandbFinishWrap, wandbLogWrap, wandbInit
 def run():
+
     args, recorder, logger, client_manager, result_out = prepare_running()
+    wandbInit(args)
     worker_num, active_num, device, epoch_lr = args.worker_num, args.active_num, args.device, args.lr
 
-    train_dataset, test_dataset, class_num, resolution_per_sample = load_datasets('CIFAR100', args.data_path)
+    train_dataset, test_dataset, class_num, resolution_per_sample = load_datasets(args.dataset_type, args.data_path)
     client_datasets = partition_data(train_dataset, worker_num, args.data_pattern)
 
     # 一些全局掌握的变量
     client_profile_list = [client_manager.get_random_profile() for _ in range(worker_num)]
-    train_loaders = [DataLoader(ds, batch_size=args.batch_size, shuffle=True) for ds in client_datasets]
+    train_loaders = [DataLoader(ds, batch_size=args.batch_size, shuffle=True) if len(ds) > 0 else None  for ds in client_datasets ]
     test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False)
     config = load_create_model_configs(args.model_type, class_num, args.pretrained)
     model_global = create_model_full(args.model_type, config)
@@ -64,12 +67,20 @@ def run():
         run_time_this_round = Fedavg_runtime_per_round(clients_this_round, run_samples_all_clients, macs_per_sample_training, parameters_of_model)
         total_time += run_time_this_round
         prRed('Round = {}, runtime = {}, Test Loss = {}, Test Acc = {}%'.format(cur_round, total_time, test_loss, test_acc))
-        recorder.add_scalar('Train/time', total_time, cur_round)
-        recorder.add_scalar('Test/acc', test_acc, cur_round)
-        recorder.add_scalar('Test/loss', test_loss, cur_round)
-        recorder.add_scalar('Test/acc-time', test_acc, total_time)
-        result_out.write('{} {:.2f} {:.2f} {:.2f} {:.4f} {:.4f}'.format(cur_round, total_time, 0, 0, test_acc,test_loss))
-        result_out.write('\n')
+        wandbLogWrap({
+            "Round" : cur_round,
+            "total_time" : total_time,
+            "test_loss" : test_loss,
+            "test_acc" : test_acc,
+            "epoch_lr" : epoch_lr
+        })
+    wandbFinishWrap()
+        # recorder.add_scalar('Train/time', total_time, cur_round)
+        # recorder.add_scalar('Test/acc', test_acc, cur_round)
+        # recorder.add_scalar('Test/loss', test_loss, cur_round)
+        # recorder.add_scalar('Test/acc-time', test_acc, total_time)
+        # result_out.write('{} {:.2f} {:.2f} {:.2f} {:.4f} {:.4f}'.format(cur_round, total_time, 0, 0, test_acc,test_loss))
+        # result_out.write('\n')
 
 
 

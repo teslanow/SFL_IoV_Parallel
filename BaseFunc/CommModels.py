@@ -51,6 +51,15 @@ def create_SL_resnet(model: nn.Module, split_point:int, class_num:int):
 
 
 def create_model_instance_SL(model_type, create_args:dict):
+    """
+
+    Args:
+        model_type:
+        create_args: 每个模型创建自己的
+
+    Returns:
+        bottom_model, top_model
+    """
     if model_type == 'Resnet34':
         split_point, class_num, pretrained = create_args['split_point'], create_args['class_num'], create_args['pretrained']
         model = resnet34(pretrained=pretrained)

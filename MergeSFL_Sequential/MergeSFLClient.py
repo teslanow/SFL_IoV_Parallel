@@ -20,3 +20,10 @@ class MergeSFLClient(ClientBase):
         smashed_data = self.model(inputs)
         send_smash = smashed_data.clone().detach()
         return send_smash, smashed_data, targets
+
+    def local_BP_training(self, grad_in, optimizer, smashed_data, device):
+        grad_in = grad_in.to(device)
+        smashed_data = smashed_data.to(device)
+        optimizer.zero_grad()
+        smashed_data.backward(grad_in.to(device))
+        optimizer.step()

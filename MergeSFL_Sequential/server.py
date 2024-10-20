@@ -1,4 +1,6 @@
 import copy
+
+import datasets
 from models import *
 from config import *
 from training_utils import *
@@ -61,7 +63,7 @@ def main():
                                                                    worker_num)
     # 去除空的partition
 
-    test_loader = datasets.cre(test_dataset, batch_size=128, shuffle=False)
+    test_loader = datasets.create_dataloaders_without_helpler(test_dataset, batch_size=128, shuffle=False)
 
     epoch_lr = args.lr
 
